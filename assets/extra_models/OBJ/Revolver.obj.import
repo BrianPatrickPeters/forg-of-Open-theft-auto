@@ -1,0 +1,25 @@
+[remap]
+
+importer="wavefront_obj"
+importer_version=1
+type="Mesh"
+uid="uid://dptljtkeosmod"
+path="res://.godot/imported/Revolver.obj-83d1493fc6ed85ceafd893ca70deaefa.mesh"
+
+[deps]
+
+files=["res://.godot/imported/Revolver.obj-83d1493fc6ed85ceafd893ca70deaefa.mesh"]
+
+source_file="res://assets/extra_models/OBJ/Revolver.obj"
+dest_files=["res://.godot/imported/Revolver.obj-83d1493fc6ed85ceafd893ca70deaefa.mesh", "res://.godot/imported/Revolver.obj-83d1493fc6ed85ceafd893ca70deaefa.mesh"]
+
+[params]
+
+generate_tangents=true
+generate_lods=true
+generate_shadow_mesh=true
+generate_lightmap_uv2=false
+generate_lightmap_uv2_texel_size=0.2
+scale_mesh=Vector3(1, 1, 1)
+offset_mesh=Vector3(0, 0, 0)
+force_disable_mesh_compression=false

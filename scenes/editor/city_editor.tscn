@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://5ksq651yif88"]
+
+[ext_resource type="Script" uid="uid://bwl51aemxda2d" path="res://scripts/editor/city_editor.gd" id="1"]
+
+[node name="CityEditor" type="Node3D" unique_id=1113761389]
+script = ExtResource("1")

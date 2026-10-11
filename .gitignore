@@ -1,0 +1,16 @@
+﻿# Godot 4+ specific ignores
+.godot/
+/android/
+
+# Exported builds
+/build/
+.vercel
+
+# Summer Engine local-only state (SummerGit, caches, locks)
+.summer/local/
+
+# Generated local files
+.godot/
+__pycache__/
+*.pyc
+

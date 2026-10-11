@@ -1,0 +1,25 @@
+[remap]
+
+importer="wavefront_obj"
+importer_version=1
+type="Mesh"
+uid="uid://bt40xe4vrdrer"
+path="res://.godot/imported/DeadBirch_1.obj-ca1bb53c8ab64293d93109f0936be84e.mesh"
+
+[deps]
+
+files=["res://.godot/imported/DeadBirch_1.obj-ca1bb53c8ab64293d93109f0936be84e.mesh"]
+
+source_file="res://assets/trees/OBJ/DeadBirch_1.obj"
+dest_files=["res://.godot/imported/DeadBirch_1.obj-ca1bb53c8ab64293d93109f0936be84e.mesh", "res://.godot/imported/DeadBirch_1.obj-ca1bb53c8ab64293d93109f0936be84e.mesh"]
+
+[params]
+
+generate_tangents=true
+generate_lods=true
+generate_shadow_mesh=true
+generate_lightmap_uv2=false
+generate_lightmap_uv2_texel_size=0.2
+scale_mesh=Vector3(1, 1, 1)
+offset_mesh=Vector3(0, 0, 0)
+force_disable_mesh_compression=false

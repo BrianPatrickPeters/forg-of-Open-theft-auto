@@ -1,0 +1,899 @@
+class_name HUD
+extends CanvasLayer
+## In-game HUD — boot screen, gameplay overlay, death screen. Built procedurally.
+## Muted, realistic palette (GTA V style): charcoal panels, steel + gold accents.
+
+signal start_pressed
+signal new_game_pressed
+signal respawn_pressed
+
+const TEXT := Color("e8e6e0")        # off-white
+const ACCENT := Color("8c9bab")      # desaturated steel blue
+const MONEY := Color("84a85f")       # muted cash green
+const GOLD := Color("c2a05a")        # warm brass — wanted / weapon
+const FAINT := Color(0.55, 0.57, 0.6)
+const BTN_BG := Color("23262b")      # dark button fill
+const PANEL_BG := Color(0.055, 0.06, 0.07, 0.82)
+const PANEL_EDGE := Color(0.55, 0.6, 0.65, 0.32)
+
+var _boot: Control
+var _hud: Control
+var _death: Control
+var _victory: Control
+var _victory_timer := 0.0
+var _toasts: VBoxContainer
+const TOAST_MAX := 5
+var _money: Label
+var _stars: Stars
+var _respect_pips: Pips
+var _respect_val: Label
+var _happiness_pips: Pips
+var _happiness_val: Label
+var _waypoint: Label
+var _clock: Label
+var _hp: ProgressBar
+var _arm: ProgressBar
+var _weapon_name: Label
+var _ammo: Label
+var _speed_label: Label
+var _speed_val: Label
+var _minimap: Minimap
+var _speedo: Speedometer
+var _speedo_panel: PanelContainer
+var _race_panel: PanelContainer
+var _nav_panel: PanelContainer
+var _nav_body: Label
+var _nav_alt: Label
+var _nav_earth: Label
+var _nav_moon: Label
+var _nav_cargo: Label
+var _nav_hint: Label
+var _race_pos: Label
+var _race_lap: Label
+var _race_time: Label
+var _race_best: Label
+var _race_drift: Label
+var _crosshair: Control
+var _scope: Control
+
+
+## Sniper scope overlay, driven by a 0..1 zoom-progress amount (see game.gd's
+## sniper_zoom_progress) rather than a plain on/off — the black surround +
+## reticle fade in/out with `amount` via modulate alpha so the scope's arrival
+## reads as part of the same animated ramp as the camera's FOV zoom, instead
+## of snapping on the instant L2 crosses the aim threshold.
+func set_scope(amount: float) -> void:
+	if _scope == null:
+		return
+	amount = clampf(amount, 0.0, 1.0)
+	var on := amount > 0.001
+	if _scope.visible != on:
+		_scope.visible = on
+		_scope.queue_redraw()
+	_scope.modulate.a = amount
+	_crosshair.visible = not on
+
+
+## Sniper scope: a black surround masking everything outside a circular view,
+## with a fine cross reticle, stadia lines and mil-dots.
+class Scope extends Control:
+	func _ready() -> void:
+		resized.connect(queue_redraw)
+
+	func _draw() -> void:
+		var sz := size
+		var c := sz * 0.5
+		var r: float = minf(sz.x, sz.y) * 0.46
+		var big := sz.length()
+		var black := Color(0, 0, 0, 1)
+		# Black surround — a thick ring from the scope edge out past the corners.
+		draw_arc(c, r + (big - r) * 0.5, 0.0, TAU, 96, black, big - r, true)
+		# Soft inner vignette + crisp rim.
+		draw_arc(c, r - 9.0, 0.0, TAU, 96, Color(0, 0, 0, 0.5), 18.0, true)
+		draw_arc(c, r, 0.0, TAU, 160, black, 3.0, true)
+		draw_arc(c, r - 2.5, 0.0, TAU, 160, Color(0.2, 0.21, 0.22, 0.8), 1.5, true)
+		# Reticle.
+		var line := Color(0.04, 0.04, 0.05, 0.95)
+		var gap := 9.0
+		for s in [-1.0, 1.0]:
+			draw_line(Vector2(c.x + gap * s, c.y), Vector2(c.x + r * s, c.y), line, 1.5, true)
+			draw_line(Vector2(c.x, c.y + gap * s), Vector2(c.x, c.y + r * s), line, 1.5, true)
+			# Heavier outer stadia.
+			draw_line(Vector2(c.x + r * 0.6 * s, c.y), Vector2(c.x + r * s, c.y), line, 4.0, true)
+			draw_line(Vector2(c.x, c.y + r * 0.6 * s), Vector2(c.x, c.y + r * s), line, 4.0, true)
+			# Mil-dots.
+			for i in range(1, 5):
+				var d: float = gap + i * (r * 0.55) / 5.0
+				draw_circle(Vector2(c.x + d * s, c.y), 1.7, line)
+				draw_circle(Vector2(c.x, c.y + d * s), 1.7, line)
+		draw_circle(c, 1.8, Color(0.75, 0.1, 0.1, 0.95))
+
+
+## A stylised top-down city minimap.
+class Minimap extends Control:
+	var px := 0.0
+	var pz := 0.0
+	var pyaw := 0.0
+	var pa := false              # President's motorcade is out
+	var pgx := 0.0
+	var pgz := 0.0
+
+	const ROAD := Color(0.30, 0.31, 0.35)
+	const GRASS := Color(0.30, 0.39, 0.24)
+	const WATER := Color(0.21, 0.43, 0.54)
+	const SAND := Color(0.62, 0.57, 0.42)
+
+	func set_player(x: float, z: float, yaw: float) -> void:
+		px = x
+		pz = z
+		pyaw = yaw
+		queue_redraw()
+
+	func set_president(active: bool, x: float, z: float) -> void:
+		pa = active
+		pgx = x
+		pgz = z
+
+	func _span() -> float:
+		return 1080.0           # wide enough to take in the bay, airport and estate
+
+	func _w2m(wx: float, wz: float) -> Vector2:
+		var span := _span()
+		return Vector2((wx / span + 0.5) * size.x, (wz / span + 0.5) * size.y)
+
+	func _draw() -> void:
+		var span := _span()
+		var wh: float = CityWorld.WORLD_HALF
+		# The bay fills the frame; landmasses sit on top.
+		draw_rect(Rect2(Vector2.ZERO, size), WATER)
+		# Mainland — wilderness and the city, everything north of the shoreline.
+		var land0 := _w2m(-span / 2.0, -span / 2.0)
+		var land1 := _w2m(span / 2.0, wh)
+		draw_rect(Rect2(land0, land1 - land0), GRASS)
+		# Beach strip along the south edge of the city.
+		var bs0 := _w2m(-wh, wh - 20.0)
+		var bs1 := _w2m(wh, wh)
+		draw_rect(Rect2(bs0, bs1 - bs0), SAND)
+		# River.
+		var rv0 := _w2m(CityWorld.RIVER_CX - CityWorld.RIVER_HALF, -wh)
+		var rv1 := _w2m(CityWorld.RIVER_CX + CityWorld.RIVER_HALF, wh)
+		draw_rect(Rect2(rv0, rv1 - rv0), WATER)
+		# Road grid.
+		for i in range(CityWorld.GRID + 1):
+			var g: float = -wh + i * CityWorld.BLOCK
+			draw_line(_w2m(g, -wh), _w2m(g, wh), ROAD, 1.5)
+			draw_line(_w2m(-wh, g), _w2m(wh, g), ROAD, 1.5)
+		# Airport island and the President's estate island.
+		_landmass(CityWorld.AIRFIELD.x0, CityWorld.AIRFIELD.z0,
+			CityWorld.AIRFIELD.x1, CityWorld.AIRFIELD.z1)
+		_landmass(CityWorld.ESTATE_GROUNDS.x0, CityWorld.ESTATE_GROUNDS.z0,
+			CityWorld.ESTATE_GROUNDS.x1, CityWorld.ESTATE_GROUNDS.z1)
+		_causeway(CityWorld.CAUSEWAY)
+		_causeway(CityWorld.ESTATE_CAUSEWAY)
+		# Landmarks.
+		_marker(CityWorld.AIRPORT.x, CityWorld.AIRPORT.z, Color("e0b050"))
+		_marker(CityWorld.EXCHANGE.x, CityWorld.EXCHANGE.z, Color("4fe6b0"))
+		_marker(CityWorld.PRESIDENT_HOUSE.x, CityWorld.PRESIDENT_HOUSE.z, Color("c878e0"))
+		# The President — a pulsing red marker while his motorcade is out.
+		if pa:
+			var pp := _w2m(clampf(pgx, -span / 2.0, span / 2.0),
+				clampf(pgz, -span / 2.0, span / 2.0))
+			draw_circle(pp, 6.5, Color("e23b3b"))
+			draw_circle(pp, 6.5, Color(0, 0, 0, 0.6), false, 1.5)
+			draw_circle(pp, 11.0, Color("e23b3b"), false, 2.0)
+		# Player arrow.
+		var fwd := Vector2(sin(pyaw), cos(pyaw))
+		var perp := Vector2(fwd.y, -fwd.x)
+		var c := _w2m(clampf(px, -span / 2.0, span / 2.0),
+			clampf(pz, -span / 2.0, span / 2.0))
+		var tri := PackedVector2Array([
+			c + fwd * 9.0, c - fwd * 5.0 + perp * 6.0, c - fwd * 5.0 - perp * 6.0])
+		draw_colored_polygon(tri, Color("f4f4f0"))
+		draw_polyline(PackedVector2Array([tri[0], tri[1], tri[2], tri[0]]),
+			Color(0, 0, 0, 0.6), 1.0, true)
+
+	func _landmass(x0: float, z0: float, x1: float, z1: float) -> void:
+		var a := _w2m(x0, z0)
+		var b := _w2m(x1, z1)
+		draw_rect(Rect2(a, b - a), GRASS)
+
+	func _causeway(r: Dictionary) -> void:
+		var a := _w2m(r.x0, r.z0)
+		var b := _w2m(r.x1, r.z1)
+		draw_rect(Rect2(a, b - a), ROAD)
+
+	func _marker(wx: float, wz: float, col: Color) -> void:
+		var p := _w2m(wx, wz)
+		draw_circle(p, 4.0, col)
+		draw_circle(p, 4.0, Color(0, 0, 0, 0.5), false, 1.0)
+
+
+## The wanted level drawn as five proper stars.
+class Stars extends Control:
+	var level := 0
+	const STAR := Color("d2b25e")
+	const EMPTY := Color(0.5, 0.5, 0.52, 0.7)
+
+	func set_level(n: int) -> void:
+		if n != level:
+			level = n
+			queue_redraw()
+
+	func _draw() -> void:
+		var r := 9.0
+		var gap := 25.0
+		var cy := size.y / 2.0
+		for i in 5:
+			_star(Vector2(r + 2.0 + i * gap, cy), r, i < level)
+
+	func _star(c: Vector2, r: float, filled: bool) -> void:
+		var pts := PackedVector2Array()
+		for k in 10:
+			var ang := -PI / 2.0 + k * PI / 5.0
+			var rad: float = r if k % 2 == 0 else r * 0.42
+			pts.append(c + Vector2(cos(ang), sin(ang)) * rad)
+		if filled:
+			for k in 10:
+				draw_colored_polygon(
+					PackedVector2Array([c, pts[k], pts[(k + 1) % 10]]), STAR)
+		else:
+			var loop := PackedVector2Array(pts)
+			loop.append(pts[0])
+			draw_polyline(loop, EMPTY, 1.3, true)
+
+
+## A compact 5-pip meter — used for Respect and Happiness in the top bar,
+## same "how full is it" language as the wanted stars but a plainer dot shape
+## since these two live side by side in a small panel.
+class Pips extends Control:
+	var level := 0     # 0..5
+	var on_color := Color("c2a05a")
+	const OFF := Color(0.5, 0.5, 0.52, 0.55)
+
+	func set_level(n: int) -> void:
+		if n != level:
+			level = n
+			queue_redraw()
+
+	func _draw() -> void:
+		var r := 5.0
+		var gap := 13.0
+		var cy := size.y / 2.0
+		for i in 5:
+			draw_circle(Vector2(r + 1.0 + i * gap, cy), r, on_color if i < level else OFF)
+
+
+## A semicircular car speedometer — arc gauge, sweeping needle, digital readout.
+class Speedometer extends Control:
+	const W := 210.0
+	const H := 132.0
+	const START := 135.0          # arc start angle (degrees)
+	const SWEEP := 270.0          # total arc sweep
+	const TRACK := Color(0.5, 0.52, 0.56, 0.55)
+	const FILL := Color("c2a05a")
+	const REDLINE := Color("c8534a")
+	const NEEDLE := Color("e8e6e0")
+
+	var _frac := 0.0
+	var _num: Label
+
+	func _ready() -> void:
+		custom_minimum_size = Vector2(W, H)
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_num = Label.new()
+		_num.add_theme_font_size_override("font_size", 40)
+		_num.add_theme_color_override("font_color", NEEDLE)
+		_num.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_num.size = Vector2(W, 46)
+		_num.position = Vector2(0, 40)
+		_num.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_num.text = "0"
+		add_child(_num)
+		var unit := Label.new()
+		unit.text = "KM/H"
+		unit.add_theme_font_size_override("font_size", 13)
+		unit.add_theme_color_override("font_color", Color(0.55, 0.57, 0.6))
+		unit.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		unit.size = Vector2(W, 16)
+		unit.position = Vector2(0, 86)
+		unit.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		add_child(unit)
+
+	func set_speed(kmh: float, frac: float) -> void:
+		_frac = clampf(frac, 0.0, 1.0)
+		if _num != null:
+			_num.text = str(int(round(kmh)))
+		queue_redraw()
+
+	func _draw() -> void:
+		var c := Vector2(W / 2.0, H - 12.0)
+		var r := 78.0
+		var s := deg_to_rad(START)
+		var e := deg_to_rad(START + SWEEP)
+		draw_arc(c, r, s, e, 96, TRACK, 5.0, true)
+		var rl := deg_to_rad(START + SWEEP * 0.82)
+		draw_arc(c, r, rl, e, 32, REDLINE, 5.0, true)
+		if _frac > 0.002:
+			var fe := deg_to_rad(START + SWEEP * _frac)
+			draw_arc(c, r, s, fe, 96, FILL, 5.0, true)
+		for i in 10:
+			var a := deg_to_rad(START + SWEEP * i / 9.0)
+			var d := Vector2(cos(a), sin(a))
+			draw_line(c + d * (r - 12.0), c + d * (r - 3.0), TRACK, 2.0)
+		var na := deg_to_rad(START + SWEEP * _frac)
+		var nd := Vector2(cos(na), sin(na))
+		draw_line(c, c + nd * (r - 8.0), NEEDLE, 3.0, true)
+		draw_circle(c, 6.0, NEEDLE)
+		draw_circle(c, 3.0, Color("23262b"))
+
+
+func _ready() -> void:
+	layer = 10
+	_build_boot()
+	_build_hud()
+	_build_death()
+	_build_victory()
+	_hud.visible = false
+	_death.visible = false
+	_victory.visible = false
+
+func _panel_style() -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = PANEL_BG
+	sb.border_color = PANEL_EDGE
+	sb.set_border_width_all(1)
+	sb.set_corner_radius_all(3)
+	sb.content_margin_left = 12
+	sb.content_margin_right = 12
+	sb.content_margin_top = 7
+	sb.content_margin_bottom = 7
+	return sb
+
+func _panel(child: Control) -> PanelContainer:
+	var p := PanelContainer.new()
+	p.add_theme_stylebox_override("panel", _panel_style())
+	p.add_child(child)
+	return p
+
+func _label(text: String, size: int, color: Color) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.add_theme_font_size_override("font_size", size)
+	l.add_theme_color_override("font_color", color)
+	return l
+
+func _accent_button(text: String) -> Button:
+	var btn := Button.new()
+	btn.text = text
+	btn.add_theme_font_size_override("font_size", 24)
+	btn.custom_minimum_size = Vector2(280, 62)
+	var normal := StyleBoxFlat.new()
+	normal.bg_color = BTN_BG
+	normal.border_color = ACCENT
+	normal.set_border_width_all(1)
+	normal.set_corner_radius_all(3)
+	normal.content_margin_left = 24
+	normal.content_margin_right = 24
+	var hover := normal.duplicate()
+	hover.bg_color = Color("32363d")
+	hover.border_color = TEXT
+	btn.add_theme_stylebox_override("normal", normal)
+	btn.add_theme_stylebox_override("hover", hover)
+	btn.add_theme_stylebox_override("pressed", hover)
+	btn.add_theme_stylebox_override("focus", normal)
+	btn.add_theme_color_override("font_color", TEXT)
+	btn.add_theme_color_override("font_hover_color", TEXT)
+	return btn
+
+# ---------------- Boot screen ----------------
+func _build_boot() -> void:
+	_boot = Control.new()
+	_boot.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(_boot)
+	var bg := ColorRect.new()
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg.color = Color("0c0d0f")
+	_boot.add_child(bg)
+
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_boot.add_child(center)
+	var vb := VBoxContainer.new()
+	vb.alignment = BoxContainer.ALIGNMENT_CENTER
+	vb.add_theme_constant_override("separation", 16)
+	center.add_child(vb)
+
+	var title := _label("GTA VI", 124, TEXT)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vb.add_child(title)
+	var tag := _label("FREE HARBOR   ·   3D   ·   2026", 20, ACCENT)
+	tag.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vb.add_child(tag)
+
+	# Continue an existing save, or start fresh. With no save there's just one
+	# button (a fresh start).
+	if SaveGame.has_save():
+		var cont := _accent_button("CONTINUE")
+		cont.pressed.connect(func(): start_pressed.emit())
+		var cw := CenterContainer.new()
+		cw.add_child(cont)
+		vb.add_child(cw)
+		var ng := _accent_button("NEW GAME")
+		ng.pressed.connect(func(): new_game_pressed.emit())
+		var nw := CenterContainer.new()
+		nw.add_child(ng)
+		vb.add_child(nw)
+	else:
+		var btn := _accent_button("PRESS START")
+		btn.pressed.connect(func(): start_pressed.emit())
+		var btn_wrap := CenterContainer.new()
+		btn_wrap.add_child(btn)
+		vb.add_child(btn_wrap)
+	# Give the boot buttons gamepad/keyboard focus — without it a controller
+	# player with a save could never pick NEW GAME (mouse-only button).
+	UiNav.apply.call_deferred(vb)
+
+	var controls := _label(
+		"WASD move / drive    Mouse look    L-Click shoot    F enter/exit vehicle\n"
+		+ "Q / Tab / Z weapons    1-9 pick    scroll cycle    SHIFT sprint / boost\n"
+		+ "SPACE handbrake    E downtown kiosks    G enter Grand Prix (in an F1 car)    M mute    R respawn / heal\n"
+		+ "ESC pause menu — resume, rebind controls, or exit\n"
+		+ "GAMEPAD  L stick move/steer   R stick look   R2/L2 accel/brake   L2 aim · R2 fire   "
+		+ "paddle L sprint · paddle R melee   ✕ confirm   ○ back   Options pause",
+		15, Color(0.55, 0.57, 0.6))
+	controls.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vb.add_child(controls)
+
+# ---------------- In-game HUD ----------------
+func _build_hud() -> void:
+	_hud = Control.new()
+	_hud.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_hud)
+
+	# Crosshair — hidden while the sniper scope is up.
+	_crosshair = Control.new()
+	_crosshair.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_crosshair.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hud.add_child(_crosshair)
+	for is_vert in [true, false]:
+		var c := ColorRect.new()
+		c.color = TEXT
+		if is_vert:
+			c.size = Vector2(2, 16)
+			c.position = Vector2(-1, -8)
+		else:
+			c.size = Vector2(16, 2)
+			c.position = Vector2(-8, -1)
+		c.anchor_left = 0.5
+		c.anchor_right = 0.5
+		c.anchor_top = 0.5
+		c.anchor_bottom = 0.5
+		_crosshair.add_child(c)
+
+	# Sniper scope overlay — a black surround with a circular view and a fine
+	# reticle. Hidden until the player aims the sniper.
+	_scope = Scope.new()
+	_scope.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_scope.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_scope.visible = false
+	_hud.add_child(_scope)
+
+	# Top bar — money, wanted, waypoint, clock.
+	var top := HBoxContainer.new()
+	top.add_theme_constant_override("separation", 8)
+	top.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	top.offset_left = 16
+	top.offset_right = -16
+	top.offset_top = 16
+	_hud.add_child(top)
+	_money = _label("$0", 24, MONEY)
+	top.add_child(_panel(_money))
+	var wanted_box := HBoxContainer.new()
+	wanted_box.add_theme_constant_override("separation", 9)
+	var wlbl := _label("WANTED", 15, GOLD)
+	wlbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	wanted_box.add_child(wlbl)
+	_stars = Stars.new()
+	_stars.custom_minimum_size = Vector2(132, 26)
+	wanted_box.add_child(_stars)
+	top.add_child(_panel(wanted_box))
+
+	# Reputation panel — Respect (how feared/famous you are) and Happiness
+	# (the city's mood toward you), each a 5-pip meter + the raw number.
+	var rep_col := VBoxContainer.new()
+	rep_col.add_theme_constant_override("separation", 2)
+	var rep_row := HBoxContainer.new()
+	rep_row.add_theme_constant_override("separation", 6)
+	rep_row.add_child(_label("REP", 11, FAINT))
+	_respect_pips = Pips.new()
+	_respect_pips.on_color = GOLD
+	_respect_pips.custom_minimum_size = Vector2(72, 14)
+	rep_row.add_child(_respect_pips)
+	_respect_val = _label("5", 13, GOLD)
+	rep_row.add_child(_respect_val)
+	rep_col.add_child(rep_row)
+	var mood_row := HBoxContainer.new()
+	mood_row.add_theme_constant_override("separation", 6)
+	mood_row.add_child(_label("MOOD", 11, FAINT))
+	_happiness_pips = Pips.new()
+	_happiness_pips.on_color = MONEY
+	_happiness_pips.custom_minimum_size = Vector2(72, 14)
+	mood_row.add_child(_happiness_pips)
+	_happiness_val = _label("50", 13, MONEY)
+	mood_row.add_child(_happiness_val)
+	rep_col.add_child(mood_row)
+	top.add_child(_panel(rep_col))
+
+	_waypoint = _label("AIRPORT", 17, ACCENT)
+	var wp_panel := _panel(_waypoint)
+	wp_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_waypoint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	top.add_child(wp_panel)
+	_clock = _label("12:00", 20, ACCENT)
+	top.add_child(_panel(_clock))
+
+	# Left status column — HP, armour, weapon, speed — under the top bar.
+	var status := VBoxContainer.new()
+	status.add_theme_constant_override("separation", 6)
+	var left := _panel(status)
+	left.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	left.offset_left = 16
+	left.offset_top = 68
+	_hud.add_child(left)
+	status.add_child(_make_bar("HEALTH", true))
+	status.add_child(_make_bar("ARMOUR", false))
+	var wsrow := HBoxContainer.new()
+	wsrow.add_theme_constant_override("separation", 22)
+	status.add_child(wsrow)
+	var wbox := VBoxContainer.new()
+	wbox.add_child(_label("WEAPON", 11, FAINT))
+	_weapon_name = _label("PISTOL", 16, GOLD)
+	wbox.add_child(_weapon_name)
+	_ammo = _label("inf", 13, TEXT)
+	wbox.add_child(_ammo)
+	wsrow.add_child(wbox)
+	var sbox := VBoxContainer.new()
+	_speed_label = _label("SPD", 11, FAINT)
+	sbox.add_child(_speed_label)
+	_speed_val = _label("0", 22, ACCENT)
+	sbox.add_child(_speed_val)
+	wsrow.add_child(sbox)
+
+	# Minimap — bottom-right corner.
+	_minimap = Minimap.new()
+	_minimap.custom_minimum_size = Vector2(228, 228)
+	_minimap.clip_contents = true
+	var map_panel := _panel(_minimap)
+	map_panel.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	map_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	map_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	map_panel.offset_right = -16
+	map_panel.offset_bottom = -16
+	_hud.add_child(map_panel)
+
+	# Speedometer — bottom-centre, only visible while driving a car.
+	_speedo = Speedometer.new()
+	_speedo_panel = _panel(_speedo)
+	_speedo_panel.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	_speedo_panel.anchor_left = 0.5
+	_speedo_panel.anchor_right = 0.5
+	_speedo_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_speedo_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	_speedo_panel.offset_bottom = -16
+	_speedo_panel.visible = false
+	_hud.add_child(_speedo_panel)
+
+	# Race panel — top-right, only visible while driving (lap timing + drift).
+	var race_box := VBoxContainer.new()
+	race_box.add_theme_constant_override("separation", 2)
+	_race_pos = _label("P 1/1", 22, TEXT)
+	race_box.add_child(_race_pos)
+	_race_lap = _label("LAP 0", 15, GOLD)
+	race_box.add_child(_race_lap)
+	_race_time = _label("0:00.00", 27, TEXT)
+	race_box.add_child(_race_time)
+	_race_best = _label("BEST  --:--", 13, ACCENT)
+	race_box.add_child(_race_best)
+	_race_drift = _label("DRIFT  0", 13, MONEY)
+	race_box.add_child(_race_drift)
+	_race_panel = _panel(race_box)
+	_race_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	_race_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	_race_panel.offset_right = -16
+	_race_panel.offset_top = 68
+	_race_panel.visible = false
+	_hud.add_child(_race_panel)
+
+	# Spacecraft nav panel — top-right (same slot as the race panel; you can't
+	# be lapping the circuit and flying to the Moon at once), fed every frame
+	# by set_space_nav() while the spacecraft is being flown.
+	var nav_box := VBoxContainer.new()
+	nav_box.add_theme_constant_override("separation", 2)
+	nav_box.add_child(_label("SPACECRAFT NAV", 11, FAINT))
+	_nav_body = _label("EARTH — LANDED", 19, ACCENT)
+	nav_box.add_child(_nav_body)
+	_nav_alt = _label("ALT  0 m", 26, TEXT)
+	nav_box.add_child(_nav_alt)
+	_nav_earth = _label("EARTH  0 km", 13, MONEY)
+	nav_box.add_child(_nav_earth)
+	_nav_moon = _label("MOON  384,400 km", 13, GOLD)
+	nav_box.add_child(_nav_moon)
+	_nav_cargo = _label("", 13, MONEY)
+	nav_box.add_child(_nav_cargo)
+	_nav_hint = _label("", 12, FAINT)
+	nav_box.add_child(_nav_hint)
+	_nav_panel = _panel(nav_box)
+	_nav_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	_nav_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	_nav_panel.offset_right = -16
+	_nav_panel.offset_top = 68
+	_nav_panel.visible = false
+	_hud.add_child(_nav_panel)
+
+	# Notification toasts — a bottom-centre stack of cards. Newest sits at the
+	# bottom (nearest the anchor); older cards rise above it and fade out. Built
+	# by show_objective()/_add_toast(); the container just lays them out.
+	_toasts = VBoxContainer.new()
+	_toasts.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	_toasts.anchor_left = 0.5
+	_toasts.anchor_right = 0.5
+	_toasts.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	_toasts.grow_vertical = Control.GROW_DIRECTION_BEGIN   # grow upward from the bottom
+	_toasts.offset_bottom = -76                            # clear the bottom edge / grab handle
+	_toasts.alignment = BoxContainer.ALIGNMENT_END
+	_toasts.add_theme_constant_override("separation", 8)
+	_toasts.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_hud.add_child(_toasts)
+
+func _make_bar(bar_name: String, is_hp: bool) -> VBoxContainer:
+	var box := VBoxContainer.new()
+	box.add_child(_label(bar_name, 11, FAINT))
+	var bar := ProgressBar.new()
+	bar.custom_minimum_size = Vector2(190, 13)
+	bar.show_percentage = false
+	bar.max_value = 100.0
+	bar.value = 100.0
+	var bg := StyleBoxFlat.new()
+	bg.bg_color = Color(0, 0, 0, 0.5)
+	bg.set_corner_radius_all(2)
+	var fg := StyleBoxFlat.new()
+	fg.bg_color = (Color("6f9e5a") if is_hp else Color("6f8aa3"))
+	fg.set_corner_radius_all(2)
+	bar.add_theme_stylebox_override("background", bg)
+	bar.add_theme_stylebox_override("fill", fg)
+	if is_hp:
+		_hp = bar
+	else:
+		_arm = bar
+	box.add_child(bar)
+	return box
+
+# ---------------- Death screen ----------------
+func _build_death() -> void:
+	_death = Control.new()
+	_death.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(_death)
+	var bg := ColorRect.new()
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg.color = Color(0.05, 0.04, 0.04, 0.78)
+	_death.add_child(bg)
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_death.add_child(center)
+	var vb := VBoxContainer.new()
+	vb.alignment = BoxContainer.ALIGNMENT_CENTER
+	vb.add_theme_constant_override("separation", 18)
+	center.add_child(vb)
+	var t := _label("WASTED", 96, Color("9c3a30"))
+	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vb.add_child(t)
+	var p := _label("You woke up at the hospital. Lost some cash.", 18, Color(0.7, 0.7, 0.72))
+	p.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vb.add_child(p)
+	var btn := _accent_button("CONTINUE")
+	btn.pressed.connect(func(): respawn_pressed.emit())
+	var bw := CenterContainer.new()
+	bw.add_child(btn)
+	vb.add_child(bw)
+	# game.gd also honours a hardcoded Cross/R press on this screen even
+	# without focus (see _input()'s player_hp <= 0 branch), but giving the
+	# button real gamepad/keyboard focus keeps its visual state (and any other
+	# input path that reaches it) consistent with every other screen.
+	UiNav.apply.call_deferred(vb)
+
+## A full-bleed "CITY OWNED" banner — non-blocking, fades out on its own.
+func _build_victory() -> void:
+	_victory = Control.new()
+	_victory.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_victory.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_victory)
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_victory.add_child(center)
+	var vb := VBoxContainer.new()
+	vb.alignment = BoxContainer.ALIGNMENT_CENTER
+	vb.add_theme_constant_override("separation", 14)
+	center.add_child(vb)
+	var t := _label("CITY OWNED", 110, Color("e0b24a"))
+	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vb.add_child(t)
+	var p := _label("The President is dead. Free Harbor answers to you now.",
+		24, Color(0.86, 0.86, 0.9))
+	p.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vb.add_child(p)
+
+# ---------------- Public API ----------------
+func enter_game() -> void:
+	_boot.visible = false
+	_hud.visible = true
+	_death.visible = false
+	_victory.visible = false
+
+func show_death() -> void:
+	_death.visible = true
+
+func hide_death() -> void:
+	_death.visible = false
+
+func show_victory() -> void:
+	_victory.visible = true
+	_victory.modulate.a = 1.0
+	_victory_timer = 8.0
+
+## Public notification API (unchanged signature) — now renders each message as a
+## toast card in the bottom-centre stack instead of a single top ticker.
+func show_objective(text: String, secs := 3.5) -> void:
+	_add_toast(text, secs)
+
+
+# Emoji / accent categories inferred from the message so callers don't change.
+const _BAD := ["💀", "lost", "failed", "shut down", "busted", "wanted", "destroyed", "stolen", "⚠"]
+const _GOOD := ["🎉", "📈", "🤝", "💰", "+$", "payout", "raised", "exited", "acquired", "ipo", "backed", "donated", "sold", "bought", "won", "restock"]
+
+
+func _add_toast(text: String, secs: float) -> void:
+	var t := text.strip_edges()
+	if t == "":
+		return
+	# A leading emoji becomes the card icon; the rest is the message body.
+	var icon := ""
+	if t.length() > 0 and t.unicode_at(0) > 0x2190:
+		var sp := t.find(" ")
+		icon = t.substr(0, sp) if sp > 0 else t
+		t = t.substr(sp + 1) if sp > 0 else ""
+	var low := (icon + " " + t).to_lower()
+	var accent := ACCENT
+	for k in _BAD:
+		if low.find(k) != -1:
+			accent = Color("c8534a"); break
+	if accent == ACCENT:
+		for k in _GOOD:
+			if low.find(k) != -1:
+				accent = MONEY; break
+	if icon == "":
+		icon = "!" if accent == Color("c8534a") else ("＄" if accent == MONEY else "›")
+
+	var card := PanelContainer.new()
+	card.add_theme_stylebox_override("panel", _toast_style())
+	card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card.modulate.a = 0.0
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 10)
+	card.add_child(row)
+	var bar := ColorRect.new()
+	bar.color = accent
+	bar.custom_minimum_size = Vector2(4, 0)
+	bar.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	row.add_child(bar)
+	var ic := _label(icon, 18, accent)
+	ic.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	row.add_child(ic)
+	var msg := _label(t, 15, TEXT)
+	msg.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	msg.custom_minimum_size = Vector2(300, 0)
+	msg.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	msg.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	row.add_child(msg)
+
+	card.custom_minimum_size = Vector2(0, 44)
+	_toasts.add_child(card)
+	# queue_free() is deferred (the child lingers in the count until end of
+	# frame), so remove_child() first — otherwise this loop never terminates.
+	while _toasts.get_child_count() > TOAST_MAX:
+		var old := _toasts.get_child(0)
+		_toasts.remove_child(old)
+		old.queue_free()
+
+	var tw := create_tween()
+	tw.tween_property(card, "modulate:a", 1.0, 0.22)
+	tw.tween_interval(maxf(0.5, secs))
+	tw.tween_property(card, "modulate:a", 0.0, 0.45)
+	tw.tween_callback(card.queue_free)
+
+
+func _toast_style() -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.085, 0.095, 0.11, 0.95)
+	sb.border_color = PANEL_EDGE
+	sb.set_border_width_all(1)
+	sb.set_corner_radius_all(9)
+	sb.content_margin_left = 8
+	sb.content_margin_right = 14
+	sb.content_margin_top = 8
+	sb.content_margin_bottom = 8
+	sb.shadow_color = Color(0, 0, 0, 0.45)
+	sb.shadow_size = 5
+	sb.shadow_offset = Vector2(0, 2)
+	return sb
+
+
+func _process(delta: float) -> void:
+	if _victory_timer > 0.0:
+		_victory_timer -= delta
+		if _victory_timer < 1.5:
+			_victory.modulate.a = clampf(_victory_timer / 1.5, 0.0, 1.0)
+		if _victory_timer <= 0.0:
+			_victory.visible = false
+
+func update_hud(data: Dictionary) -> void:
+	_money.text = "$" + _commas(int(data.money))
+	_stars.set_level(clampi(int(round(data.wanted)), 0, 5))
+	_respect_pips.set_level(clampi(int(round(data.respect / 20.0)), 0, 5))
+	_respect_val.text = str(int(round(data.respect)))
+	_happiness_pips.set_level(clampi(int(round(data.happiness / 20.0)), 0, 5))
+	_happiness_val.text = str(int(round(data.happiness)))
+	var mins := int(data.time_min)
+	_clock.text = "%02d:%02d" % [int(mins / 60.0) % 24, mins % 60]
+	_hp.value = clampf(data.hp / data.hp_max * 100.0, 0.0, 100.0)
+	_arm.value = clampf(data.armor / data.armor_max * 100.0, 0.0, 100.0)
+	_weapon_name.text = data.weapon
+	_ammo.text = (data.ammo if data.ammo is String else str(int(data.ammo)))
+	_speed_label.text = data.speed_label
+	_speed_val.text = str(int(data.speed_val))
+	_speedo_panel.visible = data.show_speedo
+	if data.show_speedo:
+		_speedo.set_speed(data.speed_kmh, data.speed_frac)
+	_waypoint.text = data.waypoint
+	_minimap.set_president(data.pres_active, data.pres_x, data.pres_z)
+	_minimap.set_player(data.map_x, data.map_z, data.map_yaw)
+	_race_panel.visible = data.racing
+	if data.racing:
+		_race_pos.text = "P %d/%d" % [int(data.race_rank), int(data.race_total)]
+		_race_lap.text = "LAP %d/%d" % [int(data.lap) + 1, int(data.total_laps)]
+		_race_time.text = data.lap_time
+		_race_best.text = "BEST  " + str(data.best_lap)
+		_race_drift.text = "DRIFT  " + _commas(int(data.drift))
+
+
+## Live spacecraft navigation readout — game.gd feeds this every frame while
+## the spacecraft is flown ({title, alt_m, earth_km, moon_km, hint}) and
+## passes an empty dict to hide it again.
+func set_space_nav(nav: Dictionary) -> void:
+	if nav.is_empty():
+		_nav_panel.visible = false
+		return
+	_nav_panel.visible = true
+	_nav_body.text = nav.title
+	_nav_alt.text = "ALT  %s m" % _commas(int(nav.alt_m))
+	_nav_earth.text = "EARTH  %s km" % _commas(int(nav.earth_km))
+	_nav_moon.text = "MOON  %s km" % _commas(int(nav.moon_km))
+	var cargo: float = nav.get("cargo_kg", 0.0)
+	_nav_cargo.text = "CARGO  %d kg He-3" % int(cargo)
+	_nav_cargo.visible = cargo > 0.0
+	_nav_hint.text = nav.hint
+	_nav_hint.visible = nav.hint != ""
+
+## Group digits with thousands separators: 70991741333 -> "70,991,741,333".
+func _commas(value: int) -> String:
+	var neg := value < 0
+	var digits := str(absi(value))
+	var out := ""
+	var c := 0
+	for i in range(digits.length() - 1, -1, -1):
+		out = digits[i] + out
+		c += 1
+		if c % 3 == 0 and i > 0:
+			out = "," + out
+	return ("-" + out) if neg else out
