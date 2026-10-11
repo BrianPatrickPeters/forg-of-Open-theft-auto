@@ -3,8 +3,8 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://pn6eynu74qba"
-path.s3tc="res://.godot/imported/T_Eye_Brown.png-34ef0d56e1c7266678b1f34f3c450e03.s3tc.ctex"
-path.etc2="res://.godot/imported/T_Eye_Brown.png-34ef0d56e1c7266678b1f34f3c450e03.etc2.ctex"
+path.s3tc="res://.godot/imported/T_Eye_Brown.png-ab755bde5127e98a3647597dccbbb823.s3tc.ctex"
+path.etc2="res://.godot/imported/T_Eye_Brown.png-ab755bde5127e98a3647597dccbbb823.etc2.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
@@ -12,8 +12,8 @@ metadata={
 
 [deps]
 
-source_file="res://assets/characters/Universal Base Characters[Standard]/Base Characters/textures/T_Eye_Brown.png"
-dest_files=["res://.godot/imported/T_Eye_Brown.png-34ef0d56e1c7266678b1f34f3c450e03.s3tc.ctex", "res://.godot/imported/T_Eye_Brown.png-34ef0d56e1c7266678b1f34f3c450e03.etc2.ctex"]
+source_file="res://assets/characters/Universal Base Characters[Standard]/Base Characters/Textures/T_Eye_Brown.png"
+dest_files=["res://.godot/imported/T_Eye_Brown.png-ab755bde5127e98a3647597dccbbb823.s3tc.ctex", "res://.godot/imported/T_Eye_Brown.png-ab755bde5127e98a3647597dccbbb823.etc2.ctex"]
 
 [params]
 

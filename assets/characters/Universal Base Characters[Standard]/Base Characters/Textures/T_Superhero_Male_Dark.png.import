@@ -3,8 +3,8 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://bnrsfa5oysu65"
-path.s3tc="res://.godot/imported/T_Superhero_Male_Dark.png-8df6e7830473ab20792147334e849e53.s3tc.ctex"
-path.etc2="res://.godot/imported/T_Superhero_Male_Dark.png-8df6e7830473ab20792147334e849e53.etc2.ctex"
+path.s3tc="res://.godot/imported/T_Superhero_Male_Dark.png-d244ddfbd395eb2cabf8e04817e77cc5.s3tc.ctex"
+path.etc2="res://.godot/imported/T_Superhero_Male_Dark.png-d244ddfbd395eb2cabf8e04817e77cc5.etc2.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
@@ -12,8 +12,8 @@ metadata={
 
 [deps]
 
-source_file="res://assets/characters/Universal Base Characters[Standard]/Base Characters/textures/T_Superhero_Male_Dark.png"
-dest_files=["res://.godot/imported/T_Superhero_Male_Dark.png-8df6e7830473ab20792147334e849e53.s3tc.ctex", "res://.godot/imported/T_Superhero_Male_Dark.png-8df6e7830473ab20792147334e849e53.etc2.ctex"]
+source_file="res://assets/characters/Universal Base Characters[Standard]/Base Characters/Textures/T_Superhero_Male_Dark.png"
+dest_files=["res://.godot/imported/T_Superhero_Male_Dark.png-d244ddfbd395eb2cabf8e04817e77cc5.s3tc.ctex", "res://.godot/imported/T_Superhero_Male_Dark.png-d244ddfbd395eb2cabf8e04817e77cc5.etc2.ctex"]
 
 [params]
 

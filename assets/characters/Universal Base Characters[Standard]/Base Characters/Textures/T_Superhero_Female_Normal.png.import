@@ -3,8 +3,8 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://b8gjxsus2nnj5"
-path.s3tc="res://.godot/imported/T_Superhero_Female_Normal.png-c36ccabcf6473effa520242289150d30.s3tc.ctex"
-path.etc2="res://.godot/imported/T_Superhero_Female_Normal.png-c36ccabcf6473effa520242289150d30.etc2.ctex"
+path.s3tc="res://.godot/imported/T_Superhero_Female_Normal.png-3b03fcab9a8066587ca76e08b5dc25df.s3tc.ctex"
+path.etc2="res://.godot/imported/T_Superhero_Female_Normal.png-3b03fcab9a8066587ca76e08b5dc25df.etc2.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
@@ -12,8 +12,8 @@ metadata={
 
 [deps]
 
-source_file="res://assets/characters/Universal Base Characters[Standard]/Base Characters/textures/T_Superhero_Female_Normal.png"
-dest_files=["res://.godot/imported/T_Superhero_Female_Normal.png-c36ccabcf6473effa520242289150d30.s3tc.ctex", "res://.godot/imported/T_Superhero_Female_Normal.png-c36ccabcf6473effa520242289150d30.etc2.ctex"]
+source_file="res://assets/characters/Universal Base Characters[Standard]/Base Characters/Textures/T_Superhero_Female_Normal.png"
+dest_files=["res://.godot/imported/T_Superhero_Female_Normal.png-3b03fcab9a8066587ca76e08b5dc25df.s3tc.ctex", "res://.godot/imported/T_Superhero_Female_Normal.png-3b03fcab9a8066587ca76e08b5dc25df.etc2.ctex"]
 
 [params]
 
